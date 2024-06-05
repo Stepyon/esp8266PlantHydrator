@@ -1,6 +1,6 @@
 #include <EEPROM.h>
 
-const unsigned int currentVersion = 5;
+const unsigned int currentVersion = 0;
 
 struct preferences {
   unsigned short sensorMin, sensorMax, wateringTimeSec;
@@ -14,13 +14,29 @@ struct preferences {
   unsigned int version;
 } prefs;
 
+const unsigned int EEPROM_SIZE = sizeof(preferences);
+const unsigned int EEPROM_ADDRESS = 0;
+
 void savePrefs() {
   prefs.version = currentVersion;  // Update version to current
-  EEPROM.put(0, prefs);  // Write the structure to EEPROM starting from address 0
+  EEPROM.put(EEPROM_ADDRESS, prefs);
   EEPROM.commit();       // Only needed for ESP8266/ESP32 to actually write to flash
+
+  if (EEPROM.commit()) {
+    #ifdef DEBUG
+    Serial.println("EEPROM commit successful");
+    #endif
+  } else {
+    #ifdef DEBUG
+    Serial.println("EEPROM commit failed");
+    #endif
+  }
 }
 
 void setDefaultPrefs() {
+  #ifdef DEBUG
+  Serial.println("Loading default prefs");
+  #endif
   // Set all your default values here
   prefs.sensorMin = 0;
   prefs.sensorMax = 1024;
@@ -36,14 +52,20 @@ void setDefaultPrefs() {
 }
 
 void loadPrefs() {
-  EEPROM.get(0, prefs);  // Read the structure starting from address 0
+  EEPROM.get(EEPROM_ADDRESS, prefs);  // Read the structure starting from address 0
   if (prefs.version != currentVersion) {
     // If version mismatch, initialize with default values
     setDefaultPrefs();
   }
+  #ifdef DEBUG
+  Serial.println("prefs.sensorMin = " + String(prefs.sensorMin));
+  Serial.println("prefs.sensorMax = " + String(prefs.sensorMax));
+  Serial.println("prefs.ts_enabled = " + String(prefs.ts_enabled));
+  Serial.println("prefs.ts_channel_id = " + String(prefs.ts_channel_id));
+  #endif
 }
 
 void setupPrefs() {
-  EEPROM.begin(sizeof(prefs));  // Initialize EEPROM with the size of `prefs`
+  EEPROM.begin(EEPROM_SIZE);
   loadPrefs();  // Optionally load preferences at startup
 }

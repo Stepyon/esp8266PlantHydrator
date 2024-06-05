@@ -13,6 +13,7 @@ body {
 
 .container {
     width: 90%;
+    margin: 10px;
     max-width: 600px;
     text-align: center;
     padding: 20px;
