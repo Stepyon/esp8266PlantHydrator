@@ -39,7 +39,7 @@ This project implements an automatic plant watering system using the ESP8266 mic
 2. **Connect the Water Pump:**
    - Use a transistor, MOSFET or relay module to interface the pump with the ESP8266.
    - Connect the control pin of the transistor/MOSFET/relay to GPIO 15.
-3. **Connect the Switch Button:**
+3. **Connect the Configuration Switch Button:**
    - One side to GPIO 4.
    - Other side to GND.
 4. **(Optional) Connect the LED Indicator or use onboard one:**
