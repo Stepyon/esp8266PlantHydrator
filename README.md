@@ -71,7 +71,7 @@ This project implements an automatic plant watering system using the ESP8266 mic
 - **Telegram Bot Token and Chat ID:** For sending notifications via Telegram.
 
 ## License
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache License Version 2.0 - see the LICENSE file for details.
 
 ## Contributing
 Contributions are welcome! Feel free to open an issue or submit a pull request.
