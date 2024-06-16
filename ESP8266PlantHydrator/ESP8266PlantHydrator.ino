@@ -157,9 +157,11 @@ void setupOTA() {
   ArduinoOTA.begin();
 }
 
+const int sensorNumReadings = 12; // Number of readings for moving average
+
 short getSensorValue() {
   short sum = 0, max = 0, min = 1024;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < sensorNumReadings; i++) {
     short cur = analogRead(A0);
     sum += cur;
     if (cur > max) max = cur;
@@ -167,23 +169,25 @@ short getSensorValue() {
     delay(20);
   }
   sum -= (max + min);
-  return sum / 8;
+  return sum / (sensorNumReadings - 2);
 }
 
-short getMoisture(short sensorValue) {
+float getMoisture(short sensorValue) {
   if (sensorValue > sensorMax) sensorMax = sensorValue;
   if (sensorValue < sensorMin) sensorMin = sensorValue;
 
   sensorValue -= sensorMin;
   short range = sensorMax - sensorMin;
   if (range <= 0) range = 1;
-  return 100 - (sensorValue * 100 / range);
+
+  float percent = 100.0 - (sensorValue * 100.0 / range);
+  return round(percent * 10) / 10.0;
 }
 
 void startWatering() {
   println("Starting watering");
   int sensorValue = getSensorValue();
-  int sensorMoisture = getMoisture(sensorValue);
+  float sensorMoisture = getMoisture(sensorValue);
   bool watering = sensorMoisture <= prefs.wateringPercent;
 
   if (connected && thingSpeakEnabled()) {
@@ -210,14 +214,31 @@ void loop() {
   }
 }
 
+short count = 0;
+short sen_value = 0;
+
+short updateAverage(short newReading, short currentAverage, int currentCount) {
+  // Calculate the new average using a cumulative moving average formula
+  int effectiveCount = min(currentCount + 1, sensorNumReadings); // Limit the denominator to sensorNumReadings
+  return currentAverage + (newReading - currentAverage) / effectiveCount;
+}
+
+void updateSensorData() {
+    sen_value = updateAverage(analogRead(A0), sen_value, count);
+    if (count < sensorNumReadings) {
+      count++;
+    }
+}
+
 void handleConfigMode() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= 500) {
+  if (currentMillis - previousMillis >= 200) {
     previousMillis = currentMillis;
     if (digitalRead(ESP_CONFIG_PIN) == HIGH) {
       println("Config pin HIGH, restart...");
       ESP.restart();
     }
+    updateSensorData();
     digitalWrite(LED_PIN, blink ? HIGH : LOW);
     blink = !blink;
   }
@@ -228,17 +249,21 @@ void handleConfigMode() {
   }
 }
 
+bool sensorForceUpdate = false;
+String getSensorsInfoStr() {
+    return "(sensor: " + String(sen_value) + ", min: " + String(sensorMin) + ", max: " + String(sensorMax) + ")";
+}
 void sensor_data() {
-  int currentValue = getSensorValue();
-  if (currentValue != lastValue) {
-    int currentMoisture = getMoisture(currentValue);
+  if (sen_value != lastValue || sensorForceUpdate) {
+    float currentMoisture = getMoisture(sen_value);
     StaticJsonDocument<200> jsonDoc;
     jsonDoc["adc_percent"] = currentMoisture;
-    jsonDoc["adc_info"] = "(sensor: " + String(currentValue) + ", min: " + String(sensorMin) + ", max: " + String(sensorMax) + ")";
+    jsonDoc["adc_info"] = getSensorsInfoStr();
     String jsonResponse;
     serializeJson(jsonDoc, jsonResponse);
     server.send(200, "application/json", jsonResponse);
-    lastValue = currentValue;
+    lastValue = sen_value;
+    sensorForceUpdate = false;
   } else {
     server.send(304);  // Not Modified
   }
@@ -291,7 +316,7 @@ void test_tg_bot() {
       server.send(200, "text/plain", "Incorrect Telegram bot token / chat id");
     } else {
       initTGbot(token, chatId);
-      bool msgSent = sendTGMessage("Soil moisture " + String(getMoisture(analogRead(A0))) + "%, watering: " + String(prefs.wateringTimeSec) + " sec");
+      bool msgSent = sendTGMessage("Soil moisture " + String(getMoisture(sen_value)) + "%, watering: " + String(prefs.wateringTimeSec) + " sec");
       server.send(200, "text/plain", msgSent ? "Test message sent" : "Error sending message");
     }
   } else {
@@ -305,8 +330,11 @@ void save_settings() {
     && server.hasArg("tg_state") && server.hasArg("tg_chat_id") && server.hasArg("tg_bot_token")) {
     
     prefs.wateringPercent = server.arg("wpc").toInt();
-    prefs.sensorMax = server.arg("smax").toInt();
-    prefs.sensorMin = server.arg("smin").toInt();
+    sensorMax = server.arg("smax").toInt();
+    sensorMin = server.arg("smin").toInt();
+    prefs.sensorMax = sensorMax;
+    prefs.sensorMin = sensorMin;
+
     prefs.wateringTimeSec = server.arg("wtime").toInt();
     
     prefs.ts_enabled = server.arg("ts_state") == "true";
@@ -319,10 +347,8 @@ void save_settings() {
     storeInputString(server.arg("tg_bot_token"), prefs.tg_bot_token, sizeof(prefs.tg_bot_token));
 
     savePrefs();
-
     println("Settings saved");
-    println("prefs.sensorMax = " + String(prefs.sensorMax));
-    
+    sensorForceUpdate = true;
     server.send(200, "text/plain", "Settings saved");
   } else {
     server.send(400, "text/plain", "Incorrect settings");
@@ -341,9 +367,8 @@ void send_ts_data() {
     if (connected) {
       long channel_id = strtoul(server.arg("ts_channel_id").c_str(), NULL, 10);
       String wkey = server.arg("ts_write_key");
-      int sensorValue = getSensorValue();
-      int sensorMoisture = getMoisture(sensorValue);
-      int result = writeTSData(channel_id, wkey.c_str(), sensorMoisture, sensorValue);
+      float sensorMoisture = getMoisture(sen_value);
+      int result = writeTSData(channel_id, wkey.c_str(), sensorMoisture, sen_value);
       msg = result == 200 ? "Sensor data has been sent successfully" : "Failed to send data, HTTP Error code: " + String(result);
     } else {
       msg = "Failed to send data to Thing Speak server, not connected to WIFI";
@@ -376,6 +401,8 @@ void handleRoot() {
   s.replace("{tg_enabled_value}", prefs.tg_enabled ? "checked" : "");
   s.replace("{tg_chat_id_value}", String(prefs.tg_chat_id));
   s.replace("{tg_bot_token_value}", prefs.tg_bot_token);
+  s.replace("{sen_value}", String(getMoisture(sen_value)));
+  s.replace("{sen_info}", getSensorsInfoStr());
   server.send(200, "text/html", s);
 }
 

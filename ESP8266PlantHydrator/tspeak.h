@@ -5,15 +5,15 @@ WiFiClient client;
 bool inited = false;
 
 void initTS() {
-    ThingSpeak.begin(client);
+    if(!inited) {
+      inited = true;
+      ThingSpeak.begin(client);
+    }
 }
 
-int writeTSData(long TSChannel, const char* writeAPIKey, int moisturePercent, int sensorData){
+int writeTSData(long TSChannel, const char* writeAPIKey, float moisturePercent, int sensorData){
 
-  if(!inited) {
-    inited = true;
-    initTS();
-  }
+  initTS();
 
   ThingSpeak.setField(1, moisturePercent);
   ThingSpeak.setField(2, sensorData);

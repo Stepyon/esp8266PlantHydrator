@@ -159,7 +159,47 @@ form {
     pointer-events: none;
 }
 
-/* Media query for mobile devices */
+#snackbar {
+  visibility: hidden;
+  min-width: 250px;
+  margin-left: -125px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 2px;
+  padding: 16px;
+  position: fixed;
+  z-index: 1;
+  left: 50%;
+  bottom: 30px;
+}
+
+#snackbar.show {
+  visibility: visible;
+  -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+  animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+
+@-webkit-keyframes fadein {
+  from {bottom: 0; opacity: 0;}
+  to {bottom: 30px; opacity: 1;}
+}
+
+@keyframes fadein {
+  from {bottom: 0; opacity: 0;}
+  to {bottom: 30px; opacity: 1;}
+}
+
+@-webkit-keyframes fadeout {
+  from {bottom: 30px; opacity: 1;}
+  to {bottom: 0; opacity: 0;}
+}
+
+@keyframes fadeout {
+  from {bottom: 30px; opacity: 1;}
+  to {bottom: 0; opacity: 0;}
+}
+
 @media (max-width: 600px) {
     body {
         font-size: 18px;
@@ -237,15 +277,14 @@ const char htmlContent[] PROGMEM = R"=====(
         <button class="button" onclick="sendPumpOff()">PUMP OFF</button>
         <button class="button" onclick="sendSleep()">SLEEP 1 MIN</button>
     </div>
-    <h3>State: <span id="state">N/A</span></h3>
     <h3>Soil moisture:</h3>
     <div class="progress-container">
         <div class="progress-bar">
             <div class="progress-fill" id="progressFill" style="width: 0"></div>
-            <div class="progress-value" id="progressValue">0%</div>
+            <div class="progress-value" id="progressValue">{sen_value}</div>
         </div>
     </div>
-    <span id="adc_val"></span>
+    <span id="adc_val">{sen_info}</span>
     <br><br>
     <form id="settingsForm">
         <h2>Settings:</h2>
@@ -314,6 +353,7 @@ const char htmlContent[] PROGMEM = R"=====(
         </div>
     </form>
 </div>
+<div id="snackbar"></div>
 <script src="script.js"></script>
 </body>
 </html>
@@ -323,55 +363,51 @@ const char htmlContent[] PROGMEM = R"=====(
 const char jsContent[] PROGMEM = R"=====(
 
 function sendSleep() {
-    sendRequest("GET", "sleep", "state");
+    sendRequest("GET", "sleep", null, false, true);
 }
 
 function sendPumpOn() {
-    sendRequest("GET", "pump_on", "state");
+    sendRequest("GET", "pump_on", null, false, true);
 }
 
 function sendPumpOff() {
-    sendRequest("GET", "pump_off", "state");
+    sendRequest("GET", "pump_off", null, false, true);
 }
 
 function saveSettings() {
     const data = getFormData(['wtime', 'wpc', 'smax', 'smin', 'ts_state', 'ts_channel_id', 'ts_write_key', 'tg_state', 'tg_chat_id', 'tg_bot_token']);
-    sendRequest("POST", "save_settings", "state", data, false, true);
+    sendRequest("POST", "save_settings", data, false, true);
 }
 
 function resetSettings() {
     if (confirm("Are you sure you want to reset all settings to default values?")) {
-        sendRequest("GET", "reset", "state", null, true);
+        sendRequest("GET", "reset", null, true, true);
     }
 }
 
 function resetWifi() {
     if (confirm("The device will reboot to WIFI configuration portal. Are you sure you want to reset WIFI settings?")) {
-        sendRequest("GET", "reset_wifi", "state", null, true);
+        sendRequest("GET", "reset_wifi", null, true);
     }
 }
 
 function sendTgTest() {
     const data = getFormData(['tg_chat_id', 'tg_bot_token']);
-    sendRequest("POST", "test_tg_bot", "state", data, false, true);
+    sendRequest("POST", "test_tg_bot", data, false, true);
 }
 
 function sendTSData() {
     const data = getFormData(['ts_channel_id', 'ts_write_key']);
-    sendRequest("POST", "send_ts_data", "state", data, false, true);
+    sendRequest("POST", "send_ts_data", data, false, true);
 }
 
-function sendRequest(method, url, elementId, data = null, reload = false, alertOnSuccess = false) {
+function sendRequest(method, url, data = null, reload = false, showShackBar = false) {
     const xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
         if (this.readyState === 4) {
-            if (elementId) {
-                const displayElement = document.getElementById(elementId);
-                displayElement.innerHTML = this.status === 200 ? this.responseText : "Error - Status: " + this.status;
-            }
             if (this.status === 200) {
-                if (alertOnSuccess) {
-                    alert(this.responseText);
+                if (showShackBar) {
+                    showSnackbar(this.responseText);
                 }
                 if (reload) {
                     if (elementId) {
@@ -379,8 +415,8 @@ function sendRequest(method, url, elementId, data = null, reload = false, alertO
                     }
                     location.reload();
                 }
-            } else if (alertOnSuccess) {
-                alert("Error - Status: " + this.status);
+            } else if (showShackBar) {
+                showSnackbar("Error - Status: " + this.status);
             }
         }
     };
@@ -467,6 +503,11 @@ setInterval(getData, 2000);
 document.addEventListener('DOMContentLoaded', function() {
     toggleTsSupport();
     toggleTgSupport();
+
+    var p = document.getElementById("progressValue");
+    var progress = parseFloat(p.textContent);
+    updateProgressBar(progress);
+
     document.querySelectorAll('form').forEach(form => {
         form.addEventListener('submit', e => e.preventDefault());
     });
@@ -477,12 +518,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const savedData = localStorage.getItem("responseText");
     if (savedData) {
-        const stateElement = document.getElementById("state");
+        const stateElement = document.getElementById("snackbar");
         if (stateElement) {
-            stateElement.innerHTML = savedData;
+            showSnackbar(savedData);
         }
         localStorage.removeItem("responseText");
     }
 });
+
+function showSnackbar(message) {
+  var x = document.getElementById("snackbar");
+  x.textContent = message;
+  x.className = "show";
+  setTimeout(function(){ x.className = x.className.replace("show", ""); }, 3000);
+}
 
 )=====";
